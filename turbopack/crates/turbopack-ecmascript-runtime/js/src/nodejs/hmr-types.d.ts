@@ -30,7 +30,3 @@ interface NodeJsPartialHmrUpdate {
   type: 'partial'
   instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
 }
-
-interface NodeJsRestartHmrUpdate {
-  type: 'restart'
-}

@@ -215,12 +215,19 @@ interface IssuesUpdate extends BaseUpdate {
 
 interface PartialUpdate extends BaseUpdate {
   type: 'partial'
-  // Same wire format the server pull returns: both come from Rust's
-  // `EcmascriptUpdateInstruction`.
-  instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
+  instruction: EcmascriptUpdateInstruction
 }
 
 export type Update = IssuesUpdate | PartialUpdate
+
+/**
+ * The serialized form of Rust's `EcmascriptUpdateInstruction`. Not runtime
+ * specific: the browser applies it via the client HMR subscription, and Node.js
+ * via `__turbopack_server_hmr_apply__`.
+ */
+export type EcmascriptUpdateInstruction =
+  | EcmascriptMergedUpdate
+  | ChunkListUpdate
 
 /**
  * IMPORTANT: This type is duplicated in:
@@ -229,7 +236,7 @@ export type Update = IssuesUpdate | PartialUpdate
  * The runtime file cannot import from this ES module without triggering module semantics,
  * so we maintain a copy there. Please keep both definitions in sync.
  */
-export interface NodeJsEcmascriptMergedUpdate {
+export interface EcmascriptMergedUpdate {
   type: 'EcmascriptMergedUpdate'
   entries?: Record<
     string,
@@ -242,16 +249,16 @@ export interface NodeJsEcmascriptMergedUpdate {
   >
 }
 
-export interface NodeJsChunkListUpdate {
+export interface ChunkListUpdate {
   type: 'ChunkListUpdate'
-  merged?: NodeJsEcmascriptMergedUpdate[]
+  merged?: EcmascriptMergedUpdate[]
   chunks?: Record<string, { type: 'added' | 'deleted' | 'total' | 'partial' }>
 }
 
 /** The payload `__turbopack_server_hmr_apply__` takes. */
 export interface NodeJsPartialHmrUpdate {
   type: 'partial'
-  instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
+  instruction: EcmascriptUpdateInstruction
 }
 
 /**
@@ -272,7 +279,7 @@ export type ServerHmrUpdate =
   | {
       kind: 'partial'
       version: ServerHmrVersion
-      instruction: NodeJsEcmascriptMergedUpdate | NodeJsChunkListUpdate
+      instruction: EcmascriptUpdateInstruction
     }
 
 export interface HmrChunkNames {
@@ -343,7 +350,7 @@ export interface Project {
 
   getServerHmrUpdate(
     from: ServerHmrVersion | undefined
-  ): Promise<TurbopackResult<ServerHmrUpdate>>
+  ): Promise<ServerHmrUpdate>
 
   clientHmrEvents(
     identifier: string

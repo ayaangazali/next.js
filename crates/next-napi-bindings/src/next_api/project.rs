@@ -1850,10 +1850,15 @@ async fn hmr_update_with_issues_operation(
     .cell())
 }
 
+/// No issues alongside the chunks. A build-graph failure surfaces by the read
+/// below *throwing*. Anything else this operation could report is a subset of
+/// what the per-endpoint write operations emit — it only reaches compute through
+/// `get_asset` — and JS already collects those into `currentEntryIssues` from
+/// both the route build and each app page's `rscHmrEndpoint` change
+/// subscription, neither of which depends on a pull happening.
 #[turbo_tasks::value(serialization = "skip")]
-struct ServerHmrChunksWithIssues {
+struct ServerHmrChunksWithEffects {
     chunks: ReadRef<HmrChunksWithContent>,
-    issues: Arc<Vec<ReadRef<PlainIssue>>>,
     effects: Arc<Effects>,
 }
 
@@ -1869,9 +1874,9 @@ fn project_server_hmr_chunks_operation(project: ResolvedVc<Project>) -> Vc<HmrCh
 /// superseded one on each later change.
 #[tracing::instrument(level = "info", name = "server hmr chunks", skip_all)]
 #[turbo_tasks::function(operation, root)]
-async fn server_hmr_chunks_with_issues_operation(
+async fn server_hmr_chunks_with_effects_operation(
     project: ResolvedVc<Project>,
-) -> Result<Vc<ServerHmrChunksWithIssues>> {
+) -> Result<Vc<ServerHmrChunksWithEffects>> {
     tracing::info!("server hmr chunks");
     let chunks_op = project_server_hmr_chunks_operation(project);
     // See `hmr_update_with_issues_operation`: the JS consumer relies on this
@@ -1880,15 +1885,8 @@ async fn server_hmr_chunks_with_issues_operation(
         .read_strongly_consistent()
         .final_read_hint()
         .await?;
-    let filter = project.issue_filter().await?;
-    let issues = get_issues(chunks_op, &filter).await?;
     let effects = Arc::new(take_effects(chunks_op).await?);
-    Ok(ServerHmrChunksWithIssues {
-        chunks,
-        issues,
-        effects,
-    }
-    .cell())
+    Ok(ServerHmrChunksWithEffects { chunks, effects }.cell())
 }
 
 /// The version a server HMR pull produced, handed to JS so it can pass it back
@@ -1955,24 +1953,24 @@ impl NapiServerHmrUpdate {
 pub async fn project_get_server_hmr_update(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     from: Option<&External<ServerHmrVersion>>,
-) -> napi::Result<TurbopackResult<NapiServerHmrUpdate>> {
+) -> napi::Result<NapiServerHmrUpdate> {
     let container = project.container;
     let turbo_tasks = project.turbopack_ctx.turbo_tasks();
     let from = from.map(|from| from.0.clone());
 
-    let (update, issues) = turbo_tasks
+    let update = turbo_tasks
         .run_once(async move {
             // HACK(bgw): Remove this unmark call
             unmark_top_level_task_may_leak_eventually_consistent_state();
             let project = container.project().to_resolved().await?;
             // HACK(bgw): Remove this mark call
             mark_top_level_task();
-            let chunks_op = server_hmr_chunks_with_issues_operation(project);
+            let chunks_op = server_hmr_chunks_with_effects_operation(project);
             let read =
                 read_strongly_consistent_and_apply_effects(chunks_op, |v| &v.effects).await?;
             // HACK(bgw): Remove this unmark call
             unmark_top_level_task_may_leak_eventually_consistent_state();
-            let ServerHmrChunksWithIssues { chunks, issues, .. } = &*read;
+            let ServerHmrChunksWithEffects { chunks, .. } = &*read;
             // No `from` on a caller's first pull. Nothing diffs against
             // `NotFoundVersion`, so that pull reports no changes and exists only
             // to hand back the current version.
@@ -1982,22 +1980,13 @@ pub async fn project_get_server_hmr_update(
             };
             // Diffed here rather than inside the operation above, so that no task
             // is keyed on `from`. See `compute_server_hmr_update`.
-            let update = compute_server_hmr_update(chunks, from).await?;
-            Ok((update, issues.clone()))
+            compute_server_hmr_update(chunks, from).await
         })
         .await
         .map_err(|e| napi::Error::from_reason(PrettyPrintError(&e).to_string()))?;
 
-    let result = NapiServerHmrUpdate::new(&update)
-        .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error).to_string()))?;
-
-    Ok(TurbopackResult {
-        result,
-        issues: issues
-            .iter()
-            .map(|issue| NapiIssue::from(&**issue))
-            .collect(),
-    })
+    NapiServerHmrUpdate::new(&update)
+        .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error).to_string()))
 }
 
 #[tracing::instrument(level = "info", name = "get client HMR events", skip(env, project, func), fields(chunk_name = %chunk_name))]

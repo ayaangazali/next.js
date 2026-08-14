@@ -645,7 +645,7 @@ export declare function projectGetAllCompilationIssues(project: {
 export declare function projectGetServerHmrUpdate(
   project: { __napiType: 'Project' },
   from?: ExternalObject<ServerHmrVersion> | undefined | null
-): Promise<TurbopackResult<NapiServerHmrUpdate>>
+): Promise<NapiServerHmrUpdate>
 
 export declare function projectGetSourceForAsset(
   project: { __napiType: 'Project' },

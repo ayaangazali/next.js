@@ -178,10 +178,8 @@ function createServerHmrApplier(
   project: Project,
   {
     reEvaluateAllModulesExpensive,
-    onApplied,
   }: {
     reEvaluateAllModulesExpensive: () => void | Promise<void>
-    onApplied: () => void | Promise<void>
   }
 ) {
   // Serializes pulls: two concurrent ones would diff against the same
@@ -193,7 +191,10 @@ function createServerHmrApplier(
   // establishes the starting point.
   let currentVersion: ServerHmrVersion | undefined
 
-  // Announcing to browsers belongs to `reEvaluateAllModulesExpensive`/`onApplied`.
+  // Announces nothing. Pulls only happen while building a route for an in-flight
+  // request, and that request renders from the graph this patched — so there is
+  // nobody to tell. Announcing here would refetch every client a second time,
+  // after the change path already announced.
   async function pullAndApply() {
     const update = await project.getServerHmrUpdate(currentVersion)
     // A thrown pull leaves this alone, so the next one re-diffs from the same
@@ -239,14 +240,11 @@ function createServerHmrApplier(
       // applies the same update to it.
       mirrorModuleStateToDevValidationWorker({ type: 'apply', update: payload })
     } catch {
-      // A matching runtime tried the apply and threw. Evict require.cache
-      // so the next request loads fresh, then skip onApplied. (A no-match
-      // update is a no-op and does not throw.)
+      // A matching runtime tried the apply and threw. Evict require.cache so
+      // the next request loads fresh. (A no-match update is a no-op and does
+      // not throw.)
       await reEvaluateAllModulesExpensive()
-      return
     }
-
-    await onApplied()
   }
 
   // Never rejects. Recovering from a failed pull or apply is this function's
@@ -744,20 +742,12 @@ export async function createHotReloaderTurbopack(
     // validation worker cannot repair its own either, so it is dropped and
     // the next validation loads the build output afresh.
     dropDevValidationWorker()
-
-    notifyServerComponentChanges()
   }
 
   // Applies any pending server HMR update. Nothing is applied in-process without
   // server fast refresh, so there is nothing to pull either.
   const applyServerHmrUpdate: () => Promise<void> = serverFastRefresh
-    ? createServerHmrApplier(project, {
-        reEvaluateAllModulesExpensive,
-        // A successful apply leaves `require.cache` intact — the patched modules
-        // in devModuleCache are what preserve dependencies — so announcing is
-        // all there is to do.
-        onApplied: notifyServerComponentChanges,
-      })
+    ? createServerHmrApplier(project, { reEvaluateAllModulesExpensive })
     : async () => {}
 
   const buildingIds = new Set()
@@ -833,48 +823,20 @@ export async function createHotReloaderTurbopack(
   let updateInProgress = false
   let pendingServerComponentChanges = false
 
-  // The client is displaying a compilation error, and only a refetch clears it.
-  // Latched at compile end rather than read at announce time, because by then
-  // the error is gone: the whole point is to remember that it was there.
+  // The only place SERVER_COMPONENT_CHANGES is sent, and it is sent whenever a
+  // compile reports a change — not gated on whether server HMR found a delta.
+  // Fixing a file by restoring it byte-for-byte leaves the module graph identical
+  // to the last good one, so a delta-gated announce would go silent on exactly
+  // the edit that has to clear the client's error overlay.
   //
-  // It has to override the deference below, because fixing the file can produce
-  // no server-HMR delta at all — restoring it byte-for-byte leaves the module
-  // graph identical to the last good one — leaving nobody to announce and the
-  // client stuck on the error.
-  let clientShowingStaleError = false
-
-  // The one place SERVER_COMPONENT_CHANGES is sent, so the one place the latch
-  // above is cleared. Suppressed while errors are outstanding: an RSC refetch
-  // would 500 and force a full-page navigation, losing client state (e.g. while
-  // recovering from a syntax error). The next clean compile announces instead.
+  // Suppressed while errors are outstanding: an RSC refetch would 500 and force a
+  // full-page navigation, losing client state (e.g. while recovering from a syntax
+  // error). The next clean compile announces instead.
   function notifyServerComponentChanges() {
     if (hasCompilationErrors()) return
-    clientShowingStaleError = false
     sendHmr('server-component-changes', {
       type: HMR_MESSAGE_SENT_TO_BROWSER.SERVER_COMPONENT_CHANGES,
     })
-  }
-
-  // Every announcement makes every client refetch, so exactly one of the two
-  // owners may send it: the applier (from `onApplied` or
-  // `reEvaluateAllModulesExpensive`, once it has patched or dropped the module
-  // graph) or this function.
-  async function sendServerComponentChanges() {
-    // A live handler means the applier can patch the running module graph, and
-    // will announce once it has. With no live handler there is nothing for it to
-    // patch — the page has not rendered yet, or a redbox is up, or it is an edge
-    // page, which never registers one — so it stays silent and this is the only
-    // signal there is.
-    //
-    // Sampled before the pull, which clears the registry when it re-evaluates.
-    const applierWillAnnounce =
-      (globalThis.__turbopack_server_hmr_handlers__?.size ?? 0) > 0
-
-    await applyServerHmrUpdate()
-
-    if (!applierWillAnnounce || clientShowingStaleError) {
-      notifyServerComponentChanges()
-    }
   }
 
   // Each announcement makes every client refetch its page, so an update's
@@ -883,7 +845,7 @@ export async function createHotReloaderTurbopack(
     if (updateInProgress) {
       pendingServerComponentChanges = true
     } else {
-      void sendServerComponentChanges()
+      notifyServerComponentChanges()
     }
   }
 
@@ -2009,9 +1971,10 @@ export async function createHotReloaderTurbopack(
               },
             })
 
-            // Render from a module graph that reflects what is on disk. The
-            // applier announces to browsers itself if it changed anything, and
-            // is a no-op without server fast refresh.
+            // Render from a module graph that reflects what is on disk. This is
+            // the only server HMR pull: it is driven by the request being built,
+            // which is what makes evaluation of a changed module lazy. No-op
+            // without server fast refresh.
             //
             // Only App Router routes render through the server HMR module graph;
             // for anything else the pull would have nothing to apply.
@@ -2079,15 +2042,9 @@ export async function createHotReloaderTurbopack(
           pendingBuilding.cancel()
           if (pendingServerComponentChanges) {
             pendingServerComponentChanges = false
-            await sendServerComponentChanges()
+            notifyServerComponentChanges()
           }
           sendEnqueuedMessages()
-
-          // Latched after the flush above, so a compile that recovers from an
-          // error still sees the latch set while it was failing.
-          if (hasCompilationErrors()) {
-            clientShowingStaleError = true
-          }
 
           function addToErrorsMap(
             errorsMap: Map<string, CompilationError>,

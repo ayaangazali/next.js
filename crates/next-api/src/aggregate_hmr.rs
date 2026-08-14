@@ -38,9 +38,9 @@ pub fn is_entry_chunk_list_content(content: ResolvedVc<Box<dyn VersionedContent>
 
 /// Per-chunk versions keyed by path
 #[turbo_tasks::value(serialization = "skip", shared)]
-pub struct AggregateHmrVersion {
+pub(crate) struct AggregateHmrVersion {
     #[turbo_tasks(trace_ignore)]
-    pub versions: FxIndexMap<RcStr, TraitRef<Box<dyn Version>>>,
+    versions: FxIndexMap<RcStr, TraitRef<Box<dyn Version>>>,
 }
 
 #[turbo_tasks::value_impl]
@@ -72,7 +72,7 @@ impl Version for AggregateHmrVersion {
 }
 
 impl AggregateHmrVersion {
-    pub async fn from_chunks(chunks: &[HmrChunkWithContent]) -> Result<Vc<Self>> {
+    async fn from_chunks(chunks: &[HmrChunkWithContent]) -> Result<Vc<Self>> {
         let versions = chunks
             .iter()
             .map(|HmrChunkWithContent { path, content }| {
@@ -93,13 +93,13 @@ impl AggregateHmrVersion {
 
 /// Aggregates per-entry HMR instructions into a single combined `ChunkListUpdate`.
 #[derive(Default)]
-pub struct ChunkListUpdateBuilder {
+struct ChunkListUpdateBuilder {
     chunks: FxIndexMap<RcStr, ChunkUpdate>,
     merged: FxIndexSet<EcmascriptMergedUpdate>,
 }
 
 impl ChunkListUpdateBuilder {
-    pub fn add_instruction(&mut self, instruction: &UpdateInstruction) -> Result<()> {
+    fn add_instruction(&mut self, instruction: &UpdateInstruction) -> Result<()> {
         let Some(instruction) = instruction.downcast_ref::<EcmascriptUpdateInstruction>() else {
             bail!("aggregate HMR only accepts ECMAScript update instructions")
         };
@@ -123,11 +123,11 @@ impl ChunkListUpdateBuilder {
         self.merged.insert(update.clone());
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.chunks.is_empty() && self.merged.is_empty()
     }
 
-    pub fn build(self) -> UpdateInstruction {
+    fn build(self) -> UpdateInstruction {
         ChunkListUpdate {
             chunks: self.chunks,
             merged: self.merged.into_iter().collect(),
@@ -165,37 +165,29 @@ pub enum ServerHmrUpdate {
     },
 }
 
-/// Per-chunk [`Update`]s computed against an `AggregateHmrVersion` snapshot.
-/// `has_new_chunks` is true when the current snapshot contains chunks absent
-/// from `from` (e.g. a new endpoint was written); callers decide whether that
-/// affects the batch shape.
-pub struct DiffResult {
-    pub chunk_updates: Vec<(RcStr, ReadRef<Update>)>,
-    pub has_new_chunks: bool,
+/// The result of diffing every tracked chunk against `from`.
+enum ChunkDiff {
+    /// `from` is not an [`AggregateHmrVersion`], so there is nothing meaningful to
+    /// diff against.
+    NotDiffable,
+    Diffed {
+        /// Per-chunk [`Update`]s against the `from` snapshot.
+        chunk_updates: Vec<(RcStr, ReadRef<Update>)>,
+        /// Set when the current snapshot contains chunks absent from `from`, e.g.
+        /// a new endpoint was written.
+        has_new_chunks: bool,
+    },
 }
 
 /// Diffs each chunk against `from`.
-///
-/// If `from` is not an [`AggregateHmrVersion`], there's nothing meaningful to
-/// diff against, so this returns no updates and leaves it to the caller to
-/// decide what to do.
-pub async fn diff_chunks_against(
+async fn diff_chunks_against(
     chunks: &[HmrChunkWithContent],
     from: Vc<Box<dyn Version>>,
-) -> Result<DiffResult> {
-    if chunks.is_empty() {
-        return Ok(DiffResult {
-            chunk_updates: Vec::new(),
-            has_new_chunks: false,
-        });
-    }
+) -> Result<ChunkDiff> {
     let from_resolved = from.to_resolved().await?;
     let Some(from_aggregate) = ResolvedVc::try_downcast_type::<AggregateHmrVersion>(from_resolved)
     else {
-        return Ok(DiffResult {
-            chunk_updates: Vec::new(),
-            has_new_chunks: false,
-        });
+        return Ok(ChunkDiff::NotDiffable);
     };
     let from_aggregate = from_aggregate.await?;
 
@@ -215,7 +207,7 @@ pub async fn diff_chunks_against(
         })
         .try_join()
         .await?;
-    Ok(DiffResult {
+    Ok(ChunkDiff::Diffed {
         chunk_updates,
         has_new_chunks,
     })
@@ -259,20 +251,16 @@ pub async fn compute_server_hmr_update(
         .into_trait_ref()
         .await?;
 
-    let DiffResult {
-        chunk_updates,
-        has_new_chunks,
-    } = diff_chunks_against(chunks, from).await?;
-
-    // Nothing to apply, but `from` still needs to advance to `to`. Reaching here
-    // means `from` held a version we couldn't diff against (it wasn't an
-    // `AggregateHmrVersion`), so `diff_chunks_against` gave up and returned
-    // nothing. Advancing the caller forward makes the *next* change produce a
-    // real diff; reporting a restart instead would force a needless full
-    // re-evaluation.
-    if chunk_updates.is_empty() && !has_new_chunks {
-        return Ok(ServerHmrUpdate::Version { to: to_ref });
-    }
+    let (chunk_updates, has_new_chunks) = match diff_chunks_against(chunks, from).await? {
+        // Nothing to apply, but advancing the caller to `to` makes the *next*
+        // change produce a real diff. Reporting a restart instead would force a
+        // needless full re-evaluation.
+        ChunkDiff::NotDiffable => return Ok(ServerHmrUpdate::Version { to: to_ref }),
+        ChunkDiff::Diffed {
+            chunk_updates,
+            has_new_chunks,
+        } => (chunk_updates, has_new_chunks),
+    };
 
     let mut builder = ChunkListUpdateBuilder::default();
     for (_path, update) in chunk_updates {

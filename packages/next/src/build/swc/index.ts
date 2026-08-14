@@ -760,14 +760,14 @@ function bindingToApi(
 
     async getServerHmrUpdate(
       from: ServerHmrVersion | undefined
-    ): Promise<TurbopackResult<ServerHmrUpdate>> {
+    ): Promise<ServerHmrUpdate> {
       // The cast narrows the generated flat object into the `kind`-discriminated
       // union; napi has no way to express that the optional fields travel with
       // `kind: 'partial'`.
       return binding.projectGetServerHmrUpdate(
         this._nativeProject,
         from
-      ) as Promise<TurbopackResult<ServerHmrUpdate>>
+      ) as Promise<ServerHmrUpdate>
     }
 
     clientHmrEvents(
