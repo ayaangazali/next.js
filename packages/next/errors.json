@@ -1470,5 +1470,6 @@
   "1469": "The payload's transport tree is missing a slot that exists in the loader tree: %s",
   "1470": "`deflateResumeDataCache` should not be called in edge runtime.",
   "1471": "Cannot resolve a dynamic segment that has no param value: the response provides no rendered pathname to parse it from.",
-  "1472": "Cannot convert a server response with no transport data and no base tree."
+  "1472": "Cannot convert a server response with no transport data and no base tree.",
+  "1473": "The following page files do not match any complete route:\\n%s\\n\\nEvery page must be part of at least one complete route. Add matching pages or default files for the sibling parallel route slots, or remove the unreachable pages."
 }

@@ -221,6 +221,18 @@ describe('normalizeCatchallRoutes', () => {
   })
 
   describe('strictRouteMatching pruning', () => {
+    it('does not report pages when strict route matching is disabled', () => {
+      const appPaths = {
+        '/[...slug]': ['/[...slug]/page'],
+        '/foo': ['/@first/foo/page'],
+        '/bar': ['/@second/bar/page'],
+      }
+
+      const unmatchedAppPages = normalizeCatchAllRoutes(appPaths)
+
+      expect(unmatchedAppPages).toEqual([])
+    })
+
     it('does not require an implicit children slot with no routes', () => {
       const appPaths = {
         '/[...slug]': ['/@catchall/[...slug]/page'],
@@ -267,9 +279,16 @@ describe('normalizeCatchallRoutes', () => {
         '/bar': ['/@second/bar/page'],
       }
 
-      normalizeCatchAllRoutes(appPaths, { strictRouteMatching: true })
+      const unmatchedAppPages = normalizeCatchAllRoutes(appPaths, {
+        strictRouteMatching: true,
+      })
 
       expect(appPaths).toEqual({})
+      expect(unmatchedAppPages).toEqual([
+        '/@first/foo/page',
+        '/@second/bar/page',
+        '/[...slug]/page',
+      ])
     })
 
     it('prunes an optional children catch-all when a named slot is missing', () => {
@@ -278,11 +297,14 @@ describe('normalizeCatchallRoutes', () => {
         '/specific': ['/specific/page', '/@slot/specific/page'],
       }
 
-      normalizeCatchAllRoutes(appPaths, { strictRouteMatching: true })
+      const unmatchedAppPages = normalizeCatchAllRoutes(appPaths, {
+        strictRouteMatching: true,
+      })
 
       expect(appPaths).toEqual({
         '/specific': ['/specific/page', '/@slot/specific/page'],
       })
+      expect(unmatchedAppPages).toEqual(['/[[...slug]]/page'])
     })
 
     it('prunes a catch-all with an incomplete nested parallel route', () => {
@@ -435,11 +457,30 @@ describe('normalizeCatchallRoutes', () => {
         '/photo/specific': ['/@modal/(.)photo/@specific/specific/page'],
       }
 
-      normalizeCatchAllRoutes(appPaths, { strictRouteMatching: true })
+      const unmatchedAppPages = normalizeCatchAllRoutes(appPaths, {
+        strictRouteMatching: true,
+      })
 
       expect(appPaths).toEqual({
         '/photo/specific': ['/@modal/(.)photo/@specific/specific/page'],
       })
+      expect(unmatchedAppPages).toEqual([
+        '/@modal/(.)photo/@catchall/[...slug]/page',
+      ])
+    })
+
+    it('does not report a catch-all page used by more specific matchers', () => {
+      const appPaths = {
+        '/foo': ['/foo/page'],
+        '/bar': ['/bar/page'],
+        '/[...parts]': ['/@slot/[...parts]/page'],
+      }
+
+      const unmatchedAppPages = normalizeCatchAllRoutes(appPaths, {
+        strictRouteMatching: true,
+      })
+
+      expect(unmatchedAppPages).toEqual([])
     })
   })
 })

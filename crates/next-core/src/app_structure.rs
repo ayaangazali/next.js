@@ -486,6 +486,16 @@ pub struct AppPageLoaderTree {
 }
 
 impl AppPageLoaderTree {
+    fn collect_page_files(&self, pages: &mut FxIndexSet<FileSystemPath>) {
+        if let Some(page) = &self.modules.page {
+            pages.insert(page.clone());
+        }
+
+        for tree in self.parallel_routes.values() {
+            tree.collect_page_files(pages);
+        }
+    }
+
     /// Returns true if there's a page match in this loader tree.
     pub fn has_page(&self) -> bool {
         if &*self.segment == "__PAGE__" {
@@ -888,7 +898,7 @@ pub async fn collect_root_params(
 }
 
 #[turbo_tasks::function]
-fn directory_tree_to_entrypoints(
+async fn directory_tree_to_entrypoints(
     app_dir: FileSystemPath,
     directory_tree: Vc<DirectoryTree>,
     global_metadata: Vc<GlobalMetadata>,
@@ -898,8 +908,8 @@ fn directory_tree_to_entrypoints(
     next_mode: Vc<NextMode>,
     root_layouts: Vc<FileSystemPathVec>,
     root_params: Vc<RootParamVecOption>,
-) -> Vc<Entrypoints> {
-    directory_tree_to_entrypoints_internal(
+) -> Result<Vc<Entrypoints>> {
+    let entrypoints = directory_tree_to_entrypoints_internal(
         app_dir,
         global_metadata,
         is_global_not_found_enabled,
@@ -911,7 +921,75 @@ fn directory_tree_to_entrypoints(
         AppPage::new(),
         root_layouts,
         root_params,
-    )
+    );
+
+    if *strict_route_matching.await? {
+        let mut authored_pages = FxIndexSet::default();
+        let plain_tree = directory_tree.into_plain().await?;
+        collect_authored_page_files(&plain_tree, &mut authored_pages);
+
+        let mut matched_pages = FxIndexSet::default();
+        for entrypoint in entrypoints.await?.values() {
+            if let Entrypoint::AppPage { loader_tree, .. } = entrypoint {
+                loader_tree.await?.collect_page_files(&mut matched_pages);
+            }
+        }
+
+        for page in authored_pages {
+            if !matched_pages.contains(&page) {
+                UnmatchedAppPageIssue { page }.resolved_cell().emit();
+            }
+        }
+    }
+
+    Ok(entrypoints)
+}
+
+fn collect_authored_page_files(
+    directory_tree: &PlainDirectoryTree,
+    pages: &mut FxIndexSet<FileSystemPath>,
+) {
+    if let Some(page) = &directory_tree.modules.page {
+        pages.insert(page.clone());
+    }
+
+    for subdirectory in directory_tree.subdirectories.values() {
+        collect_authored_page_files(subdirectory, pages);
+    }
+}
+
+#[turbo_tasks::value]
+struct UnmatchedAppPageIssue {
+    page: FileSystemPath,
+}
+
+#[async_trait]
+#[turbo_tasks::value_impl]
+impl Issue for UnmatchedAppPageIssue {
+    async fn file_path(&self) -> Result<FileSystemPath> {
+        Ok(self.page.clone())
+    }
+
+    fn stage(&self) -> IssueStage {
+        IssueStage::AppStructure
+    }
+
+    fn severity(&self) -> IssueSeverity {
+        IssueSeverity::Error
+    }
+
+    async fn title(&self) -> Result<StyledString> {
+        Ok(StyledString::Text(rcstr!(
+            "This page does not match any complete route"
+        )))
+    }
+
+    async fn description(&self) -> Result<Option<StyledString>> {
+        Ok(Some(StyledString::Text(rcstr!(
+            "Every page must be part of at least one complete route. Add matching pages or \
+             default files for the sibling parallel route slots, or remove the unreachable page."
+        ))))
+    }
 }
 
 #[turbo_tasks::value]

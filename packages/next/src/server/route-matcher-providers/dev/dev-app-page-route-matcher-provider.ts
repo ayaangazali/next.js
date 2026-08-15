@@ -6,6 +6,7 @@ import { FileCacheRouteMatcherProvider } from './file-cache-route-matcher-provid
 import { DevAppNormalizers } from '../../normalizers/built/app'
 import { normalizeCatchAllRoutes } from '../../../build/normalize-catchall-routes'
 import { compareAppPaths } from '../../../shared/lib/router/utils/app-paths'
+import { UnmatchedAppPagesError } from '../../../shared/lib/errors/unmatched-app-pages-error'
 
 export class DevAppPageRouteMatcherProvider extends FileCacheRouteMatcherProvider<AppPageRouteMatcher> {
   private readonly expression: RegExp
@@ -41,6 +42,7 @@ export class DevAppPageRouteMatcherProvider extends FileCacheRouteMatcherProvide
       { page: string; pathname: string; bundlePath: string }
     >()
     const routeFilenames = new Array<string>()
+    const pageFilenames = new Map<string, string>()
     let appPaths: Record<string, string[]> = {}
     for (const filename of files) {
       // If the file isn't a match for this matcher, then skip it.
@@ -67,14 +69,22 @@ export class DevAppPageRouteMatcherProvider extends FileCacheRouteMatcherProvide
 
       // Save the normalization results.
       cache.set(filename, { page, pathname, bundlePath })
+      pageFilenames.set(page, filename)
 
       if (pathname in appPaths) appPaths[pathname].push(page)
       else appPaths[pathname] = [page]
     }
 
-    normalizeCatchAllRoutes(appPaths, {
+    const unmatchedAppPages = normalizeCatchAllRoutes(appPaths, {
       strictRouteMatching: this.strictRouteMatching,
     })
+    if (unmatchedAppPages.length > 0) {
+      throw new UnmatchedAppPagesError(
+        unmatchedAppPages.map(
+          (appPath) => pageFilenames.get(appPath) ?? appPath
+        )
+      )
+    }
 
     // Make sure to sort parallel routes to make the result deterministic.
     appPaths = Object.fromEntries(
