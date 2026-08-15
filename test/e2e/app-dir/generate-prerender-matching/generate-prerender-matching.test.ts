@@ -99,6 +99,7 @@ describe('unstable prerender matching', () => {
         'fallback   /en/catalog/t1/items/[bottom]'
       )
       expect(next.cliOutput).toContain('prerender  /en/catalog/t1/items/b1')
+      expect(next.cliOutput).toContain('/inferred-empty/[top]/items/[bottom]')
       expect(next.cliOutput).toContain('Emitted dynamic route patterns')
       expect(next.cliOutput).toContain('/[lang]/catalog/[top]/items/[bottom] (')
     })

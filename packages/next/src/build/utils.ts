@@ -605,10 +605,21 @@ function countDynamicSegments(pathname: string): number {
 
 /** Prints the concrete request matchers emitted for the experimental API. */
 export function printPrerenderMatchers(
-  sourceRoutes: ReadonlySet<string>,
   prerenderManifest: Pick<PrerenderManifest, 'routes' | 'dynamicRoutes'>,
   emittedDynamicRoutes: ReadonlyArray<DynamicManifestRoute>
 ): void {
+  const sourceRoutes = new Set<string>()
+  for (const route of Object.values(prerenderManifest.dynamicRoutes)) {
+    if (route.fallbackSourceRoute) {
+      sourceRoutes.add(route.fallbackSourceRoute)
+    }
+  }
+  for (const route of Object.values(prerenderManifest.routes)) {
+    if (route.srcRoute) {
+      sourceRoutes.add(route.srcRoute)
+    }
+  }
+
   if (sourceRoutes.size === 0) return
 
   print(underline('Experimental prerender matchers'))
@@ -751,7 +762,6 @@ export function printCustomRoutes({
 type PageIsStaticResult = {
   isRoutePPREnabled?: boolean
   isStatic?: boolean
-  hasPrerenderMatcher?: true
   hasServerProps?: boolean
   hasStaticProps?: boolean
   prerenderedRoutes: PrerenderedRoute[] | undefined
@@ -856,7 +866,6 @@ export async function isPageStatic({
       let componentsResult: LoadComponentsReturnType
       let prerenderedRoutes: PrerenderedRoute[] | undefined
       let prerenderFallbackMode: FallbackMode | undefined
-      let hasPrerenderMatcher: true | undefined
       let appConfig: AppSegmentConfig = {}
       let rootParamKeys: readonly string[] | undefined
       const pathIsEdgeRuntime = isEdgeRuntime(pageRuntime)
@@ -977,33 +986,30 @@ export async function isPageStatic({
             ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
               buildStaticMetadataStaticPaths(page))
           } else {
-            ;({
-              prerenderedRoutes,
-              fallbackMode: prerenderFallbackMode,
-              hasPrerenderMatcher,
-            } = await buildAppStaticPaths({
-              dir,
-              page,
-              route,
-              cacheComponents,
-              experimentalPrerenderMatching,
-              authInterrupts,
-              useCacheTimeout,
-              staticPageGenerationTimeout,
-              segments,
-              distDir,
-              requestHeaders: {},
-              isrFlushToDisk,
-              cacheMaxMemorySize,
-              cacheHandler,
-              cacheLifeProfiles,
-              ComponentMod,
-              nextConfigOutput,
-              isRoutePPREnabled,
-              buildId,
-              deploymentId,
-              rootParamKeys,
-            }))
+            ;({ prerenderedRoutes, fallbackMode: prerenderFallbackMode } =
+              await buildAppStaticPaths({
+                dir,
+                page,
+                route,
+                cacheComponents,
+                experimentalPrerenderMatching,
+                authInterrupts,
+                useCacheTimeout,
+                staticPageGenerationTimeout,
+                segments,
+                distDir,
+                requestHeaders: {},
+                isrFlushToDisk,
+                cacheMaxMemorySize,
+                cacheHandler,
+                cacheLifeProfiles,
+                ComponentMod,
+                nextConfigOutput,
+                isRoutePPREnabled,
+                buildId,
+                deploymentId,
+                rootParamKeys,
+              }))
           }
         }
       } else {
@@ -1074,7 +1080,6 @@ export async function isPageStatic({
       return {
         isStatic,
         isRoutePPREnabled,
-        hasPrerenderMatcher,
         prerenderFallbackMode,
         prerenderedRoutes,
         rootParamKeys,
