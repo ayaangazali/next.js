@@ -238,21 +238,6 @@ import { validateAppPaths } from './validate-app-paths'
 
 type Fallback = null | boolean | string
 
-function shouldRenderPrerenderedRoute(
-  route: PrerenderedRoute,
-  hasPrerenderMatcher: boolean
-): boolean {
-  if (!hasPrerenderMatcher) return true
-
-  // Blocking and not-found entries describe request matching behavior. They
-  // intentionally have no shell output. Concrete prerenders and fallback
-  // entries still need export jobs.
-  return (
-    !route.fallbackRouteParams?.length ||
-    route.fallbackMode === FallbackMode.PRERENDER
-  )
-}
-
 export type PrerenderRouteType = 'route' | 'fallback' | 'shell' | 'page'
 export type PrerenderResponse = 'empty' | 'initial' | 'complete'
 export type PrerenderCompute = 'blocking' | 'resuming' | 'static'
@@ -2560,11 +2545,8 @@ export default async function build(
                               workerResult.prerenderedRoutes
                             )
                             ssgPageRoutes = workerResult.prerenderedRoutes
-                              .filter((route) =>
-                                shouldRenderPrerenderedRoute(
-                                  route,
-                                  Boolean(workerResult.hasPrerenderMatcher)
-                                )
+                              .filter(
+                                (route) => route.isPrerenderOutput !== false
                               )
                               .map((route) => route.pathname)
                             isSSG = true
@@ -3132,20 +3114,12 @@ export default async function build(
               sortedStaticPaths.forEach(([originalAppPath, routes]) => {
                 const appConfig = appDefaultConfigs.get(originalAppPath)
                 const isDynamicError = appConfig?.dynamic === 'error'
-                const normalizedAppPath =
-                  appNormalizedPaths.get(originalAppPath)
-                const hasPrerenderMatcher = normalizedAppPath
-                  ? prerenderMatcherRoutes.has(normalizedAppPath)
-                  : false
-
                 const isRoutePPREnabled: boolean = appConfig
                   ? checkIsRoutePPREnabled(config.experimental.ppr)
                   : false
 
                 routes.forEach((route) => {
-                  if (
-                    !shouldRenderPrerenderedRoute(route, hasPrerenderMatcher)
-                  ) {
+                  if (route.isPrerenderOutput === false) {
                     delete defaultMap[route.pathname]
                     return
                   }
