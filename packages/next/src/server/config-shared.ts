@@ -1373,8 +1373,8 @@ export interface ExperimentalConfig {
   explicitParallelRouteChildren?: boolean
 
   /**
-   * Omits App Router matchers that cannot construct a complete parallel route
-   * tree for their URL.
+   * Omits catch-all-derived App Router matchers that cannot construct a
+   * complete parallel route tree for their URL.
    */
   strictRouteMatching?: boolean
 

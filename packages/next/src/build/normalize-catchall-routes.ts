@@ -1,4 +1,7 @@
-import { isInterceptionRouteAppPath } from '../shared/lib/router/utils/interception-routes'
+import {
+  INTERCEPTION_ROUTE_MARKERS,
+  isInterceptionRouteAppPath,
+} from '../shared/lib/router/utils/interception-routes'
 import { AppPathnameNormalizer } from '../server/normalizers/built/app/app-pathname-normalizer'
 
 /**
@@ -133,6 +136,11 @@ function pruneUnrenderableCatchAllRoutes(
     if (
       catchAllAppPaths.some((catchAllAppPath) => {
         const catchAllSegments = splitAppPath(catchAllAppPath).slice(0, -1)
+        const interceptionMarkerIndex = catchAllSegments.findIndex((segment) =>
+          INTERCEPTION_ROUTE_MARKERS.some((marker) =>
+            segment.startsWith(marker)
+          )
+        )
 
         for (const {
           parentSegments,
@@ -146,6 +154,13 @@ function pruneUnrenderableCatchAllRoutes(
             ...(hasChildrenSlot ? ['children'] : []),
             ...namedSlots,
           ]
+          // An interception response replaces one slot while retaining every
+          // sibling owned by layouts up to the interception marker. Those
+          // siblings use the null retain marker rather than a page or default.
+          // Slots inside the newly selected subtree still match normally.
+          const retainsInterceptionSiblings =
+            interceptionMarkerIndex !== -1 &&
+            parentSegments.length <= interceptionMarkerIndex
 
           for (const siblingSlot of siblingSlots) {
             if (siblingSlot === catchAllSlot) continue
@@ -156,11 +171,12 @@ function pruneUnrenderableCatchAllRoutes(
             const hasDefault = allAppPaths.has(
               getDefaultAppPath(parentSegments, siblingSlot)
             )
-            const usesNullChildrenFallback =
-              siblingSlot === 'children' &&
-              isInterceptionRouteAppPath(catchAllAppPath)
 
-            if (!hasMatchedPage && !hasDefault && !usesNullChildrenFallback) {
+            if (
+              !hasMatchedPage &&
+              !hasDefault &&
+              !retainsInterceptionSiblings
+            ) {
               return true
             }
           }
