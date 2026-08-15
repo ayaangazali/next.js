@@ -388,6 +388,14 @@ const NEXT_PRERENDER_INTERRUPTED = 'NEXT_PRERENDER_INTERRUPTED'
 function createPrerenderInterruptedError(message: string): Error {
   const error = new Error(message)
   ;(error as any).digest = NEXT_PRERENDER_INTERRUPTED
+  // This error only carries the digest: `isPrerenderInterruptedError` matches on
+  // that, and the stack worth showing is captured separately as
+  // `syncDynamicErrorWithStack`. It does become `AbortSignal.reason` though, and
+  // V8 keeps an Error's structured stack alive until `.stack` is read, so those
+  // frames would pin the whole render's working set for as long as anything
+  // holds the signal. Assigning `stack` drops them; `delete` and
+  // `defineProperty` do not, they only replace the accessor.
+  error.stack = `Error: ${message}`
   return error
 }
 
