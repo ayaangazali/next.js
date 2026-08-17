@@ -58,7 +58,9 @@ A link can ask for more than the App Shell with [`<Link prefetch={true}>`](/docs
 
 ## Per-segment overrides
 
-A segment that exports an explicit [`prefetch`](/docs/app/api-reference/file-conventions/route-segment-config/prefetch) value overrides the app-level default for that route.
+A segment that exports [`prefetch = 'partial'`](/docs/app/api-reference/file-conventions/route-segment-config/prefetch#partial) opts its route into Partial Prefetching while `partialPrefetching` is `false`. This is the incremental adoption path.
+
+Per-segment values do not opt a route back out once `partialPrefetching` is `true`. With the flag on, every route resolves its prefetches the way this page describes, and [`prefetch = 'force-disabled'`](/docs/app/api-reference/file-conventions/route-segment-config/prefetch#force-disabled) only stops that segment from emitting its own prefetch data: the segment can still be included in a prefetch issued for the route as a whole. To turn Partial Prefetching off for a route, keep the app-level flag `false` and opt routes in per segment instead.
 
 ## Version History
 
