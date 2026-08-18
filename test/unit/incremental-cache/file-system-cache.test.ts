@@ -6,6 +6,8 @@ import {
   CachedRouteKind,
   IncrementalCacheKind,
 } from 'next/dist/server/response-cache'
+import { tagsManifest } from 'next/dist/server/lib/incremental-cache/tags-manifest.external'
+import { NEXT_CACHE_TAGS_HEADER } from 'next/dist/lib/constants'
 
 const cacheDir = fileURLToPath(new URL('./cache', import.meta.url))
 
@@ -125,5 +127,58 @@ describe('FileSystemCache (isrMemory 0)', () => {
       revalidate: 30,
       tags: ['server-time2'],
     })
+  })
+})
+
+describe('FileSystemCache (expired tags)', () => {
+  const fsCache = new FileSystemCache({
+    _requestHeaders: {},
+    flushToDisk: true,
+    fs: nodeFs,
+    serverDistDir: cacheDir,
+    revalidatedTags: [],
+  })
+
+  afterEach(() => {
+    tagsManifest.delete('products')
+  })
+
+  it('reports an app page whose tag was revalidated as expired, not missing', async () => {
+    await fsCache.set(
+      'expired-tags-page',
+      {
+        kind: CachedRouteKind.APP_PAGE,
+        html: '<p>hello</p>',
+        rscData: Buffer.from('rsc'),
+        headers: { [NEXT_CACHE_TAGS_HEADER]: 'products' },
+        postponed: undefined,
+        status: 200,
+        segmentData: undefined,
+      },
+      {}
+    )
+
+    const beforeRevalidation = await fsCache.get('expired-tags-page', {
+      kind: IncrementalCacheKind.APP_PAGE,
+      isFallback: undefined,
+    })
+    expect(beforeRevalidation?.lastModified).toBeGreaterThan(0)
+
+    // Expire the tag as `revalidateTag(tag, { expire: 0 })` does.
+    tagsManifest.set('products', {
+      expired: performance.timeOrigin + performance.now(),
+    })
+
+    // The entry must still be returned, with `lastModified: -1`. The
+    // incremental cache turns that into `isStale: -1`, which is what forces a
+    // blocking revalidation of this path. Returning null instead is
+    // indistinguishable from a path that was never prerendered, and a dynamic
+    // route then serves its fallback shell without ever regenerating.
+    const afterRevalidation = await fsCache.get('expired-tags-page', {
+      kind: IncrementalCacheKind.APP_PAGE,
+      isFallback: undefined,
+    })
+    expect(afterRevalidation).not.toBeNull()
+    expect(afterRevalidation?.lastModified).toBe(-1)
   })
 })

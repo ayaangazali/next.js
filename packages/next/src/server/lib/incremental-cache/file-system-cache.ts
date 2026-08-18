@@ -304,9 +304,14 @@ export default class FileSystemCache implements CacheHandler {
       if (typeof tagsHeader === 'string') {
         const cacheTags = tagsHeader.split(',')
 
-        // we trigger a blocking validation if an ISR page
-        // had a tag revalidated, if we want to be a background
-        // revalidation instead we return data.lastModified = -1
+        // Report the entry as expired rather than missing, so the caller can
+        // tell "this path had a prerender that a tag revalidation expired"
+        // from "this path was never prerendered". `lastModified: -1` is what
+        // the incremental cache turns into `isStale: -1`, which forces the
+        // blocking revalidation this branch intends. Returning null instead
+        // loses that distinction, and for a dynamic route it makes the
+        // request fall through to the route's fallback shell, which never
+        // regenerates the concrete entry.
         if (
           cacheTags.length > 0 &&
           areTagsExpired(cacheTags, data.lastModified)
@@ -315,7 +320,7 @@ export default class FileSystemCache implements CacheHandler {
             console.log('FileSystemCache: expired tags', cacheTags)
           }
 
-          return null
+          return { ...data, lastModified: -1 }
         }
       }
     } else if (data?.value?.kind === CachedRouteKind.FETCH) {
