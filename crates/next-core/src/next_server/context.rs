@@ -265,6 +265,7 @@ pub async fn get_server_resolve_options_context(
         // necessarily the root of the filesystem (e.g. in a monorepo).
         server_relative_root: Some(project_path.clone()),
         after_resolve_plugins,
+        custom_extensions: next_config.resolve_extension().owned().await?,
         ..Default::default()
     };
 
@@ -281,7 +282,6 @@ pub async fn get_server_resolve_options_context(
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
-        custom_extensions: next_config.resolve_extension().owned().await?,
         tsconfig_path: TsConfigHandling::Fixed(tsconfig_path),
         rules: vec![(
             foreign_code_context_condition,

@@ -32,4 +32,11 @@ describe('turbo-resolve-extensions', () => {
     expect(html).toContain('hello web platform')
     expect(html).not.toContain('hello default platform')
   })
+
+  it('should respect resolveExtensions priority inside dependencies', async () => {
+    const res = await next.fetch('/')
+    const html = await res.text()
+    expect(html).toContain('hello web dependency')
+    expect(html).not.toContain('hello default dependency')
+  })
 })
