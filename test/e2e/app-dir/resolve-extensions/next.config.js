@@ -6,6 +6,7 @@ const extensions = [
   '.tsx',
   '.ts',
   '.jsx',
+  '.web.js',
   '.js',
   '.json',
 ]

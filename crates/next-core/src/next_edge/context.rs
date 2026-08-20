@@ -143,6 +143,8 @@ pub async fn get_edge_resolve_options_context(
         // necessarily the root of the filesystem (e.g. in a monorepo).
         server_relative_root: Some(project_path.clone()),
         after_resolve_plugins,
+        // See the note in `get_client_resolve_options_context`.
+        custom_extensions: next_config.resolve_extension().owned().await?,
 
         ..Default::default()
     };
@@ -161,7 +163,6 @@ pub async fn get_edge_resolve_options_context(
         enable_react: true,
         enable_mjs_extension: true,
         enable_edge_node_externals: true,
-        custom_extensions: next_config.resolve_extension().owned().await?,
         tsconfig_path: TsConfigHandling::Fixed(tsconfig_path),
         rules: vec![(
             foreign_code_context_condition(next_config, project_path).await?,

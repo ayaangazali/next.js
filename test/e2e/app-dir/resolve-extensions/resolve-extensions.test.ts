@@ -32,4 +32,16 @@ describe('turbo-resolve-extensions', () => {
     expect(html).toContain('hello web platform')
     expect(html).not.toContain('hello default platform')
   })
+
+  it('should respect resolveExtensions priority inside dependencies', async () => {
+    // `platform-pkg` imports './label' and ships both label.js and
+    // label.web.js. `resolveExtensions` lists `.web.js` first, so the web
+    // variant must win there exactly as it does for app code. Turbopack used
+    // to apply the configured extensions only to app code, leaving
+    // dependencies on the default list, which resolved the wrong variant.
+    const res = await next.fetch('/')
+    const html = await res.text()
+    expect(html).toContain('hello web dependency')
+    expect(html).not.toContain('hello default dependency')
+  })
 })

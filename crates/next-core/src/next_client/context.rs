@@ -198,6 +198,11 @@ pub async fn get_client_resolve_options_context(
                 .to_resolved()
                 .await?,
         )],
+        // Applies to foreign code too. `resolveExtensions` replaces the
+        // extension list for the whole graph, the way webpack's
+        // `resolve.extensions` does, so a dependency shipping a `.web.js`
+        // beside its `.js` resolves the same as app code would.
+        custom_extensions: next_config.resolve_extension().owned().await?,
         ..Default::default()
     };
 
@@ -214,7 +219,6 @@ pub async fn get_client_resolve_options_context(
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
-        custom_extensions: next_config.resolve_extension().owned().await?,
         tsconfig_path: TsConfigHandling::Fixed(tsconfig_path),
         rules: vec![(
             foreign_code_context_condition(next_config, project_path).await?,
