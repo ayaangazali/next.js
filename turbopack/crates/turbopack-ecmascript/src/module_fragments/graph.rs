@@ -713,10 +713,17 @@ impl DepGraph {
                 }
             }
 
-            if chunk.body.is_empty() {
-                continue;
-            }
-
+            // Do not compact empty groups away. `modules` is indexed by group
+            // index everywhere else in this function: `module_evaluation_ix`,
+            // the `outputs` entrypoints and the `part_deps` keys and
+            // `PartId::Internal` values are all recorded as `ix`, the group
+            // index. Skipping a group here shifts every later group's position
+            // in `modules`, so those recorded indices overshoot by the number
+            // of empty groups before them. Two or more empty groups panic at
+            // the `modules[module_evaluation_ix]` read below; exactly one
+            // silently writes `export {}` into the neighbouring fragment.
+            // An empty module here is already an expected shape: the
+            // `module_evaluation_ix.is_none()` branch below pushes one.
             modules.push(chunk);
         }
 
