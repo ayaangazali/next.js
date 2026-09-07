@@ -350,6 +350,14 @@ const crossRequestPendingCacheInvocations = new Map<
   Promise<SharedCacheResult>
 >()
 
+/**
+ * Module-scope set of `cacheHandlerKey`s with a background revalidation in
+ * flight. The pending writes are tracked on the work store, which is
+ * per-request, so without this every concurrent request that reads the same
+ * stale entry starts its own revalidation of the same key.
+ */
+const pendingBackgroundRevalidations = new Set<string>()
+
 // The first argument at each call site is the full directive that produced
 // the invocation, e.g. "'use cache'" or "'use cache: remote'".
 const debug = process.env.NEXT_PRIVATE_DEBUG_CACHE
@@ -3536,8 +3544,12 @@ export async function cache(
             }
           }
 
-          if (shouldTriggerBackgroundRevalidation) {
+          if (
+            shouldTriggerBackgroundRevalidation &&
+            !pendingBackgroundRevalidations.has(cacheHandlerKey)
+          ) {
             const revalidateCacheHandlerKey = cacheHandlerKey
+            pendingBackgroundRevalidations.add(revalidateCacheHandlerKey)
             const revalidatePromise = generateCacheEntry(
               workStore,
               // The background revalidation preserves the outer store for
@@ -3585,6 +3597,9 @@ export async function cache(
                   revalidateCacheHandlerKey,
                   error
                 )
+              })
+              .finally(() => {
+                pendingBackgroundRevalidations.delete(revalidateCacheHandlerKey)
               })
             workStore.pendingRevalidateWrites ??= []
             workStore.pendingRevalidateWrites.push(revalidatePromise)

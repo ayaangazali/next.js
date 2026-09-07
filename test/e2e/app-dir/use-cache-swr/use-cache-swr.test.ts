@@ -152,6 +152,57 @@ describe('use-cache-swr', () => {
     expect(duration3).toBeLessThan(1000)
   })
 
+  it('should dedupe SWR regens against a regen that is already running', async () => {
+    // Cold fill. Wait for its write to land before opening the measurement
+    // window, so it can't be counted as a regen, then let the entry go stale
+    // (cacheLife('seconds')).
+    await next.fetch('/dedupe')
+    await retry(() => {
+      expect(next.cliOutput).toMatch(/PersistentCacheHandler::set.*"dedupe"/)
+    })
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+
+    outputIndex = next.cliOutput.length
+
+    // This request finds the stale entry and starts a background regen, which
+    // takes ~1s because of the delay in the cached function.
+    await next.fetch('/dedupe')
+
+    // Give the leader's cache handler read time to settle, so the requests
+    // below can no longer join its pending invocation. They find the same
+    // stale entry, because the regen has not written yet.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    await Promise.all([
+      next.fetch('/dedupe'),
+      next.fetch('/dedupe'),
+      next.fetch('/dedupe'),
+    ])
+
+    // Wait for the regen to finish writing, then leave room for any further
+    // regen the requests above may have started, so it is counted rather than
+    // raced past.
+    await retry(() => {
+      expect(next.cliOutput.slice(outputIndex)).toMatch(
+        /PersistentCacheHandler::set.*"dedupe"/
+      )
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+
+    const sets = next.cliOutput
+      .slice(outputIndex)
+      .split('\n')
+      .filter(
+        (line) =>
+          line.includes('PersistentCacheHandler::set') &&
+          line.includes('"dedupe"')
+      )
+
+    // A regen that is already in flight covers every request that arrives
+    // while it runs, so the entry is written once, not once per request.
+    expect(sets).toHaveLength(1)
+  })
+
   it('should pass implicit tags to cache handler get() for nested caches during SWR', async () => {
     const browser = await next.browser('/')
     await browser.elementById('outer-data').text()
