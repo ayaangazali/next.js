@@ -2732,7 +2732,9 @@ export async function fetchSegmentPrefetchesUsingRuntimeRequest(
       // re-prefetched against the server's actual tree. This mirrors
       // dispatchRetryDueToTreeMismatch on the navigation path. It can't loop:
       // the refetched route entry is built from the server's response, so it
-      // only mismatches again if the rewrite's behavior changes again.
+      // only mismatches again if the rewrite's behavior changes again. That
+      // holds only because the mark survives the version bump this triggers;
+      // see readPattern in optimistic-routes.ts.
       // TODO: Consider also bounding retries with a counter on the task
       // object, so a prefetch that repeatedly fails to settle backs off
       // regardless of the reason.

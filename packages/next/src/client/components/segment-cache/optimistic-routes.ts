@@ -181,7 +181,17 @@ function readPattern(
   if (pattern === null) {
     return null
   }
-  if (isValueExpired(now, getCurrentRouteCacheVersion(), pattern)) {
+  // A pattern marked as a dynamic rewrite is exempt from version expiry.
+  // Marking it is what bumps the version in the first place (see
+  // markRouteEntryAsDynamicRewrite), so expiring it on that same bump would
+  // throw the mark away, let the slot be repopulated by the re-prefetch of the
+  // visible links, and send the next prediction into the same rewrite again.
+  // The mark only disables prediction, so retaining it costs nothing, and
+  // staleAt still bounds how long it lives.
+  const isExpired = pattern.hasDynamicRewrite
+    ? pattern.staleAt <= now
+    : isValueExpired(now, getCurrentRouteCacheVersion(), pattern)
+  if (isExpired) {
     // The pattern is expired. Null it out so the slot can be repopulated.
     part.pattern = null
     return null
