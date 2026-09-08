@@ -181,7 +181,10 @@ function readPattern(
   if (pattern === null) {
     return null
   }
-  if (isValueExpired(now, getCurrentRouteCacheVersion(), pattern)) {
+  const isExpired = pattern.hasDynamicRewrite
+    ? pattern.staleAt <= now
+    : isValueExpired(now, getCurrentRouteCacheVersion(), pattern)
+  if (isExpired) {
     // The pattern is expired. Null it out so the slot can be repopulated.
     part.pattern = null
     return null
