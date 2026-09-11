@@ -399,8 +399,19 @@ export function getFulfilledSegmentVaryPath(
     // If the id is null, this node is not a param (e.g., it's a request key).
     // If the id is in the varyParams set, keep the original value.
     // Otherwise, replace with Fallback to make it reusable.
+    //
+    // Root params are always kept, the same way getShellSegmentVaryPath keeps
+    // them, because the server cannot report them reliably. A
+    // `next/root-params` read inside a `'use cache'` scope is dropped: the
+    // accumulator is looked up off the work unit store, and
+    // getVaryParamsAccumulator returns null for a `cache` store, since a cache
+    // entry outlives the response that the accumulator belongs to. The
+    // response then reports no root param accesses at all, and generalizing on
+    // that silence serves one root param value's content at every other value.
     value:
-      original.id === null || varyParams.has(original.id)
+      original.id === null ||
+      original.isRootParam === true ||
+      varyParams.has(original.id)
         ? original.value
         : Fallback,
     isRootParam: original.isRootParam,
